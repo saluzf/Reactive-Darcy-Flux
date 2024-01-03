@@ -1,3 +1,3 @@
 # PorousConvection
 
-[![Build Status](https://github.com/eth-vaw-glaciology/pde-on-gpu-teachers/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/eth-vaw-glaciology/pde-on-gpu-teachers/actions/workflows/CI.yml?query=branch%3Amain)
+[![Run tests](https://github.com/saluzf/PDE-on-GPU-FabioSaluz-FinalProject/actions/workflows/CI.yml/badge.svg)](https://github.com/saluzf/PDE-on-GPU-FabioSaluz-FinalProject/actions/workflows/CI.yml)
