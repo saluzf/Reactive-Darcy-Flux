@@ -1,6 +1,6 @@
-using PorousConvection
+using FinalProject
 using Test
 
-@testset "PorousConvection.jl" begin
+@testset "FinalProject.jl" begin
     # Write your tests here.
 end
