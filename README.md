@@ -14,25 +14,32 @@ The final project is built upon the previously build [porous convection solver](
 ### Physics and Equations
 
 The continuity equation for the saline aquifier reads as shown in equation 1. With the porosity $\theta$ and the velocity vector $v$ 
-![Alt text](docs/Eq1.png)  
+
+![Alt text](./docs/Eq1.png)  
 
 We define the product of the porosity and the velocity as the darcy flux and express it as a function of   
   
-![Alt text](docs/Eq2.png)  
+![Alt text](./docs/Eq2.png)  
 
 By plugging in the Darcy's flux expression in the continuity equation we obtain: 
-![Alt text](docs/Eq3.png)  
-
+  
+![Alt text](./docs/Eq3.png)  
+  
 Density formulation for both temperature and concentration for aqueous solution as in equation 4: We consider fluid and dissolved salt = 2 species. Formulation from Chapter 5.4 in Bortoli, De AL, Greice Andreis, and Felipe Pereira. Modeling and simulation of reactive flows. Elsevier, 2015.
-![Alt text](docs/Eq4.png)  
+
+![Alt text](./docs/Eq4.png)   
+  
 By solving for 1 concentration one obtains the other from mass conservation. With
 the mass fraction balance for 2 species 1 = y1 + y2 and y = C·MW where y is
-the mass fraction and MW the molecular weight we obtain:
-![Alt text](docs/Eq5.png) 
+the mass fraction and MW the molecular weight we obtain:  
+
+![Alt text](./docs/Eq5.png)  
+
+
 ### Initial and Boundary Conditions
 
 The 
-![Alt text](docs/ReactiveSalineAqui_50_2im.png)
+![Alt text](./docs/ReactiveSalineAqui_50_2im.png)
 
 ## Results
 
