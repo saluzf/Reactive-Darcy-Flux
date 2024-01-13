@@ -19,9 +19,10 @@ function save_array(Aname, A)
     close(out)
 end
 """Compute pressure fluxes for the fluid"""
-@parallel function compute_Dflux!(qDx, qDy, qDz, Pf, T, C, C2, k_ηf, _dx, _dy, _dz, αρg, _1_θ_dτ_D)
+@parallel function compute_Dflux!(qDx, qDy, qDz, Pf, T, C, C2, k_ηf, _dx, _dy, _dz, αρg, _1_θ_dτ_D, MW1, _MW2)
     @inn_x(qDx) = @inn_x(qDx) - (@inn_x(qDx) + k_ηf * (@d_xa(Pf) * _dx)) * _1_θ_dτ_D
     @inn_y(qDy) = @inn_y(qDy) - (@inn_y(qDy) + k_ηf * (@d_ya(Pf) * _dy)) * _1_θ_dτ_D
+    @all(C2)          = (1.0-@all(C)*MW1)*_MW2
     @inn_z(qDz) = @inn_z(qDz) - (@inn_z(qDz) + k_ηf * (@d_za(Pf) * _dz - αρg * @av_za(T)- αρg * @av_za(C)- αρg * @av_za(C2))) * _1_θ_dτ_D
     return nothing
 end
@@ -82,16 +83,16 @@ end
     return nothing
 end
 """Update the concentration based on concentration transport equation and previously computed fluxes."""
-@parallel function update_C!(C, k, qCx, qCy, qCz, dCdt, _dx, _dy, _dz, _1_dt_β_dτ_C, _Ceq)
-    @inn(C) = @inn(C) - (@all(dCdt) + @d_xa(qCx) * _dx + @d_ya(qCy) * _dy + @d_za(qCz) * _dz + @all(k)*(1-@all(C)*_Ceq)) * _1_dt_β_dτ_C
+@parallel function update_C!(C, qCx, qCy, qCz, dCdt, _dx, _dy, _dz, _1_dt_β_dτ_C)
+    @inn(C) = @inn(C) - (@all(dCdt) + @d_xa(qCx) * _dx + @d_ya(qCy) * _dy + @d_za(qCz) * _dz) * _1_dt_β_dτ_C
     return nothing
 end
 
 """Computes residuals of pde"""
-@parallel function compute_r!(r_Pf, r_T, r_C, qDx, qDy, qDz, qTx, qTy, qTz, qCx, qCy, qCz, dTdt, dCdt, _dx, _dy, _dz, C, k, _Ceq)
+@parallel function compute_r!(r_Pf, r_T, r_C, qDx, qDy, qDz, qTx, qTy, qTz, qCx, qCy, qCz, dTdt, dCdt, _dx, _dy, _dz, C)
     @all(r_Pf) = @d_xa(qDx) * _dx + @d_ya(qDy) * _dy + @d_za(qDz) * _dz
     @all(r_T)  = @all(dTdt) + @d_xa(qTx) * _dx + @d_ya(qTy) * _dy + @d_za(qTz) * _dz
-    @all(r_C)  = @all(dCdt) + @d_xa(qCx) * _dx + @d_ya(qCy) * _dy + @d_za(qCz) * _dz + @all(k)*(1-@all(C)*_Ceq)
+    @all(r_C)  = @all(dCdt) + @d_xa(qCx) * _dx + @d_ya(qCy) * _dy + @d_za(qCz) * _dz
     return nothing
 end
 """Apply boundary conditions in x direction"""
@@ -112,12 +113,17 @@ end
     return
 end
 
-@views function porous_convection_3D(; nz=63, do_viz=false)
+
+
+@views function SalineAquifier3D(; nz=63,nt=50, do_viz=false)
     # physics
     lx, ly, lz = 40.0, 20.0, 20.0
     k_ηf       = 1.0
     αρg        = 1.0
     ΔT         = 200.0
+    ΔC         = 100.0
+    MW1        = 0.018                          # Molecular weigth 1
+    _MW2       = 1/(0.028+2*0.016)              # 1 over molecular weight species 2
     _Ceq       = 1.0 / 20#ΔC
     α_H2O      = 210*10^(-6)
     logke      = -13.4          # source book chapter 5
@@ -133,7 +139,6 @@ end
     nx,ny       = 2 * (nz + 1) - 1, nz
     me, dims    = init_global_grid(nx, ny, nz)  # init global grid and more
     b_width     = (8, 8, 4)                     # for comm / comp overlap
-    nt          = 500
     re_D        = 4π
     cfl         = 1.0 / sqrt(3.1)
     maxiter     = 8max(nx_g(), ny_g(), nz_g())
@@ -176,10 +181,17 @@ end
     r_C             = @zeros(nx - 2, ny - 2, nz - 2)
     qCx             = @zeros(nx - 1, ny - 2, nz - 2)
     qCy             = @zeros(nx - 2, ny - 1, nz - 2)
-    qCz  = @zeros(nx - 2, ny - 2, nz - 1)
-    C               = Data.Array([0.0 for ix = 1:nx, iy = 1:ny, iz = 1:nz])
-    C[:, :, 1  ]   .= 0.0
-    C[:, :, end]   .= 0.0
+    qCz             = @zeros(nx - 2, ny - 2, nz - 1)
+    # C               = Data.Array([0.0 for ix = 1:nx, iy = 1:ny, iz = 1:nz])
+    C               = @zeros(nx, ny, nz)
+    C               = Data.Array([ΔC * exp(-(x_g(ix, dx, C) + dx / 2 - lx / 3)^2
+                              -(y_g(iy, dy, C) + dy / 2 - ly / 3)^2
+                              -(z_g(iz, dz, C) + dz / 2 - lz / 3)^2) +
+                               ΔC * exp(-(x_g(ix, dx, C) + dx / 2 - 2*lx / 3)^2
+                              -(y_g(iy, dy, C) + dy / 2 - 2*ly / 3)^2
+                              -(z_g(iz, dz, C) + dz / 2 - 2*lz / 3)^2) for ix = 1:size(C, 1), iy = 1:size(C, 2), iz = 1:size(C, 3)])
+    C[:, :, 1  ]   .= ΔC
+    C[:, :, end]   .= ΔC
     C               = Data.Array(C)
     update_halo!(C)
     C_old           = copy(C)
@@ -189,11 +201,11 @@ end
         ENV["GKSwstype"]="nul"; if isdir("viz3D_out")==false mkdir("viz3D_out") end
         iframe = 0
         nx_v, ny_v, nz_v = (nx - 2) * dims[1], (ny - 2) * dims[2], (nz - 2) * dims[3]
-        T_v   = zeros(nx_v, ny_v, nz_v)         # global array for visu
-        T_inn = zeros(nx - 2, ny - 2, nz - 2)   # no halo local array for visu
-        C_v   = zeros(nx_v, ny_v, nz_v)         # global array for visu
-        C_inn = zeros(nx - 2, ny - 2, nz - 2)   # no halo local array for visu
-        xi_g, zi_g = LinRange(-lx / 2 + dx + dx / 2, lx / 2 - dx - dx / 2, nx_v), LinRange(-lz + dz + dz / 2, -dz - dz / 2, nz_v) # inner points only
+        T_v         = zeros(nx_v, ny_v, nz_v)         # global array for visu
+        T_inn       = zeros(nx - 2, ny - 2, nz - 2)   # no halo local array for visu
+        C_v         = zeros(nx_v, ny_v, nz_v)         # global array for visu
+        C_inn       = zeros(nx - 2, ny - 2, nz - 2)   # no halo local array for visu
+        xi_g, zi_g  = LinRange(-lx / 2 + dx + dx / 2, lx / 2 - dx - dx / 2, nx_v), LinRange(-lz + dz + dz / 2, -dz - dz / 2, nz_v) # inner points only
     end
     # action
     for it = 1:nt
@@ -216,7 +228,7 @@ end
         while max(err_D, err_T, err_C) >= ϵtol && iter <= maxiter
             # hydro
             @hide_communication b_width begin
-                @parallel compute_Dflux!(qDx, qDy, qDz, Pf, T, C, Data.Array((1.0.-C.*MW1).*_MW2), k_ηf, _dx, _dy, _dz, αρg, _1_θ_dτ_D)
+                @parallel compute_Dflux!(qDx, qDy, qDz, Pf, T, C, Data.Array((1.0.-C.*MW1).*_MW2), k_ηf, _dx, _dy, _dz, αρg, _1_θ_dτ_D, MW1, _MW2)
                 update_halo!(qDx, qDy, qDz)
             end
             @parallel update_Pf!(Pf, qDx, qDy, qDz, _dx, _dy, _dz, _β_dτ_D)
@@ -230,17 +242,16 @@ end
                 update_halo!(T)
             end
             # chem
-            k = Data.Array(10^(logke).*exp.(-Ea ./ (R .* (T .+ 273 .+ 500))))
             @parallel compute_Cflux!(qCx, qCy, qCz, dCdt, C, C_old, qDx, qDy, qDz, _dt, λ_ρCp_dx, λ_ρCp_dy, λ_ρCp_dz, _1_θ_dτ_T, _dx, _dy, _dz, _ϕ)
             @hide_communication b_width begin
-                @parallel update_C!(C, k, qCx, qCy, qCz, dCdt, _dx, _dy, _dz, _1_dt_β_dτ_T, _Ceq)
+                @parallel update_C!(C, qCx, qCy, qCz, dCdt, _dx, _dy, _dz, _1_dt_β_dτ_T)
                 @parallel (1:size(C, 2), 1:size(C, 3)) bc_x!(C)
                 @parallel (1:size(C, 1), 1:size(C, 3)) bc_y!(C)
                 @parallel (1:size(C, 1), 1:size(C, 2)) bc_z!(C)
                 update_halo!(C)
             end
             if iter % ncheck == 0 
-                @parallel compute_r!(r_Pf, r_T, r_C, qDx, qDy, qDz, qTx, qTy, qTz, qCx, qCy, qCz, dTdt, dCdt, _dx, _dy, _dz, C, k, _Ceq)
+                @parallel compute_r!(r_Pf, r_T, r_C, qDx, qDy, qDz, qTx, qTy, qTz, qCx, qCy, qCz, dTdt, dCdt, _dx, _dy, _dz, C)
                 err_D = max_g(abs.(r_Pf)); err_T = max_g(abs.(r_T)); err_C = maximum(abs.(r_C))
                 if me == 0
                     @printf("  iter/nx=%.1f, err_D=%1.3e, err_T=%1.3e, err_C=%1.3e\n", iter / nx, err_D, err_T, err_C)
@@ -252,11 +263,11 @@ end
             @printf("it = %d, iter/nx=%.1f, err_D=%1.3e, err_T=%1.3e, err_C=%1.3e\n", it, iter / nx, err_D, err_T, err_C)
         end
         # visualisation
-        if do_viz &&  (it % nvis == 0)
+        if do_viz &&  (it % nvis == 0) || it == 1
             T_inn .= Array(T)[2:end-1, 2:end-1, 2:end-1]; gather!(T_inn, T_v)
             C_inn .= Array(C)[2:end-1, 2:end-1, 2:end-1]; gather!(C_inn, C_v)
             if me == 0
-                file = matopen("$(@__DIR__)/viz3D_out/mpi3D_out_Concentration_$(it).mat", "w"); write(file, "T", Array(T_v));write(file, "C", Array(C_v)); close(file)
+                file = matopen("$(@__DIR__)/viz3D_out/SalineAqui_$(it).mat", "w"); write(file, "T", Array(T_v));write(file, "C", Array(C_v)); close(file)
             end
         end
     end
@@ -264,4 +275,4 @@ end
     return
 end
 
-porous_convection_3D(; nz=21, do_viz=true)
+SalineAquifier3D(; nz=21,nt=500, do_viz=true)
