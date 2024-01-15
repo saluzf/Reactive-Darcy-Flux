@@ -18,20 +18,25 @@ function save_array(Aname, A)
     write(out, A)
     close(out)
 end
-"""Compute pressure fluxes for the fluid"""
-@parallel function compute_Dflux!(qDx, qDy, qDz, Pf, T, C, k_ηf, _dx, _dy, _dz, αρg, _1_θ_dτ_D, MW1, _MW2)
+"""Compute pressure fluxes for the fluid:
+θ_D(∂q_D/∂τ + q_D) = -k/η(∇p - g_0[ρβ_T⋅T + β_C1⋅C_1 + β_C2⋅C_2)
+"""
+@parallel function compute_Dflux!(qDx, qDy, qDz, Pf, T, C, k_ηf, _dx, _dy, _dz, αρg, _1_θ_dτ_D, MW1, _MW2, β1ρg)
     @inn_x(qDx) = @inn_x(qDx) - (@inn_x(qDx) + k_ηf * (@d_xa(Pf) * _dx)) * _1_θ_dτ_D
     @inn_y(qDy) = @inn_y(qDy) - (@inn_y(qDy) + k_ηf * (@d_ya(Pf) * _dy)) * _1_θ_dτ_D
-    @all(C2)          = (1.0-@all(C)*MW1)*_MW2
-    @inn_z(qDz) = @inn_z(qDz) - (@inn_z(qDz) + k_ηf * (@d_za(Pf) * _dz - αρg * @av_za(T)+αρg * @av_za(C)+ αρg * @av_za(C2))) * _1_θ_dτ_D
+    @inn_z(qDz) = @inn_z(qDz) - (@inn_z(qDz) + k_ηf * (@d_za(Pf) * _dz - αρg * @av_za(T)- β1ρg* @av_za(C))) * _1_θ_dτ_D
     return nothing
 end
-"""Updates the pressure"""
+"""Updates the pressure:
+β(∂p/∂τ) + ∇⋅q_D = 0 
+"""
 @parallel function update_Pf!(Pf, qDx, qDy, qDz, _dx, _dy, _dz, _β_dτ_D)
     @all(Pf) = @all(Pf) - (@d_xa(qDx) * _dx + @d_ya(qDy) * _dy + @d_za(qDz) * _dz) * _β_dτ_D
     return nothing
 end
-"""compute temperature fluxes"""
+"""compute temperature fluxes:
+0 = (∂T/∂τ) + (T-T_old)/dt + 1/Φ(q_D⋅∇T) + ∇⋅q_T
+"""
 @parallel_indices (ix, iy, iz) function compute_Tflux!(qTx, qTy, qTz, dTdt, T, T_old, qDx, qDy, qDz, _dt, λ_ρCp_dx, λ_ρCp_dy, λ_ρCp_dz, _1_θ_dτ_T, _dx, _dy, _dz, _ϕ)
     if (ix <= size(qTx, 1) && iy <= size(qTx, 2) && iz <= size(qTx, 3))
         qTx[ix, iy, iz] = qTx[ix, iy, iz] - (qTx[ix, iy, iz] + λ_ρCp_dx * (T[ix+1, iy+1, iz+1] - T[ix, iy+1, iz+1])) * _1_θ_dτ_T
@@ -54,6 +59,9 @@ end
     end
     return nothing
 end
+"""compute concentration flux similar to temperature flux:
+0 = ∂C/∂τ + (C-C_old)/dt + 1/Φ(q_D⋅∇C)+∇⋅q_C
+"""
 @parallel_indices (ix, iy, iz) function compute_Cflux!(qCx, qCy, qCz, dCdt, C, C_old, qDx, qDy, qDz, _dt, D_dx, D_dy, D_dz, _1_θ_dτ_C, _dx, _dy, _dz, _ϕ)
     if (ix <= size(qCx, 1) && iy <= size(qCx, 2) && iz <= size(qCx, 3))
         qCx[ix, iy, iz] = qCx[ix, iy, iz] - (qCx[ix, iy, iz] + D_dx * (C[ix+1, iy+1, iz+1] - C[ix, iy+1, iz+1])) * _1_θ_dτ_C
@@ -76,74 +84,88 @@ end
     end
     return nothing
 end
-
-"""Update the temperature"""
+"""Update the temperature:
+0 = (T-T_old)/dt + 1/Φ(q_D⋅∇T) + ∇⋅q_T
+"""
 @parallel function update_T!(T, qTx, qTy, qTz, dTdt, _dx, _dy, _dz, _1_dt_β_dτ_T)
     @inn(T) = @inn(T) - (@all(dTdt) + @d_xa(qTx) * _dx + @d_ya(qTy) * _dy + @d_za(qTz) * _dz) * _1_dt_β_dτ_T
     return nothing
 end
-"""Update the concentration based on concentration transport equation and previously computed fluxes."""
+"""Update the concentration based on concentration transport equation and previously computed fluxes:
+0 = (C-C_old)/dt + 1/Φ(q_D⋅∇C) + ∇⋅q_C
+"""
 @parallel function update_C!(C, qCx, qCy, qCz, dCdt, _dx, _dy, _dz, _1_dt_β_dτ_C)
     @inn(C) = @inn(C) - (@all(dCdt) + @d_xa(qCx) * _dx + @d_ya(qCy) * _dy + @d_za(qCz) * _dz) * _1_dt_β_dτ_C
     return nothing
 end
-
-"""Computes residuals of pde"""
+"""Computes residuals of pde
+r_Pf    = ∇⋅q_D 
+re_T    = (dT/dt) + ∇⋅q_T 
+r_c     = (dC/dt) + ∇⋅q_C
+"""
 @parallel function compute_r!(r_Pf, r_T, r_C, qDx, qDy, qDz, qTx, qTy, qTz, qCx, qCy, qCz, dTdt, dCdt, _dx, _dy, _dz, C)
     @all(r_Pf) = @d_xa(qDx) * _dx + @d_ya(qDy) * _dy + @d_za(qDz) * _dz
     @all(r_T)  = @all(dTdt) + @d_xa(qTx) * _dx + @d_ya(qTy) * _dy + @d_za(qTz) * _dz
     @all(r_C)  = @all(dCdt) + @d_xa(qCx) * _dx + @d_ya(qCy) * _dy + @d_za(qCz) * _dz
     return nothing
 end
-"""Apply boundary conditions in x direction"""
+"""
+Apply boundary conditions in x direction
+"""
 @parallel_indices (iy, iz) function bc_x!(A)
     A[1  , iy, iz] = A[2    , iy, iz]
     A[end, iy, iz] = A[end-1, iy, iz]
     return
 end
-"""Apply boundary conditions in y direction"""
+"""
+Apply boundary conditions in y direction
+"""
 @parallel_indices (ix, iz) function bc_y!(A)
     A[ix, 1  , iz] = A[ix, 2    , iz]
     A[ix, end, iz] = A[ix, end-1, iz]
     return
 end
+"""
+Apply boundary conditions in z direction
+"""
 @parallel_indices (ix, iy) function bc_z!(A)
     A[ix, iy, 1]    = A[ix, iy   , 2]
     A[ix, iy, end]  = A[ix, iy   , end-1]
     return
 end
 """
+Compute pre-exponential factor based on the Arhenius law.
 """
 @parallel function update_k!(k, logke, Ea, R, T)
     @all(k) = 10^(logke)*exp.(-Ea / (R * (@all(T) + 273 + 500)))
     return nothing
 end
-"""Subtract reacting material"""
-@parallel function compute_Reaction!(C, dt, Ceq, k)
-    @all(C) = @all(C) - dt * @all(k) * (@all(C)) 
+"""
+Compute concentration change from reaction
+"""
+@parallel function compute_Reaction!(C, dt, k, _Ceq)
+    @all(C) = @all(C) + dt * @all(k) * (1-@all(C)*_Ceq) 
     return nothing
 end
-@parallel function compute_C2!(C,C2, MW1, _MW2)
-    @all(C2)          = (1.0-@all(C)*MW1)*_MW2
-    return
-end
-
-
-
+"""
+Main function Reactive Saline Aquifier
+"""
 @views function SalineAquifier3D(; nz=63,nt=50, do_viz=false)
     # physics
     lx, ly, lz = 40.0, 20.0, 20.0
     k_ηf       = 1.0
     αρg        = 1.0
     ΔT         = 200.0
-    ΔC         = 100.0
+    ΔC         = 10.0
     MW1        = 0.018                          # Molecular weigth 1
     _MW2       = 1/(0.028+2*0.016)              # 1 over molecular weight species 2
-    Ceq        = ΔC/2.0
     α_H2O      = 210*10^(-6)
+    β1ρg       = -10.0
     logke      = -13.4          # source book chapter 5
     Ea         = 90000.9        # J/mol  
     R          = 8.3144598       
+    _Ceq       = 0.1
+    C0         = 0.0
 
     ϕ          = 0.1
     Ra         = 1000
@@ -198,14 +220,6 @@ end
     qCy             = @zeros(nx - 2, ny - 1, nz - 2)
     qCz             = @zeros(nx - 2, ny - 2, nz - 1)
     C               = Data.Array(@zeros(nx, ny, nz))
-    C2              = Data.Array(@zeros(nx, ny, nz))
-    #C               = @zeros(nx, ny, nz)
-    #C               = Data.Array([ΔC * exp(-(x_g(ix, dx, C) + dx / 2 - lx / 3)^2
-    #                          -(y_g(iy, dy, C) + dy / 2 - ly / 3)^2
-    #                          -(z_g(iz, dz, C) + dz / 2 - lz / 3)^2) +
-    #                           ΔC * exp(-(x_g(ix, dx, C) + dx / 2 - 2*lx / 3)^2
-    #                          -(y_g(iy, dy, C) + dy / 2 - 2*ly / 3)^2
-    #                          -(z_g(iz, dz, C) + dz / 2 - 2*lz / 3)^2) for ix = 1:size(C, 1), iy = 1:size(C, 2), iz = 1:size(C, 3)])
     C[:, :, 1  ]   .= 0.0
     C[:, :, end]   .= 0.0
     C               = Data.Array(C)
@@ -243,9 +257,8 @@ end
         iter = 1; err_D = 2ϵtol; err_T = 2ϵtol; err_C = 2ϵtol
         while max(err_D, err_T, err_C) >= ϵtol && iter <= maxiter
             # hydro
-            @parallel compute_C2!(C, C2,MW1,_MW2)
             @hide_communication b_width begin
-                @parallel compute_Dflux!(qDx, qDy, qDz, Pf, T, C, k_ηf, _dx, _dy, _dz, αρg, _1_θ_dτ_D, MW1, _MW2)
+                @parallel compute_Dflux!(qDx, qDy, qDz, Pf, T, C, k_ηf, _dx, _dy, _dz, αρg, _1_θ_dτ_D, MW1, _MW2, β1ρg)
                 update_halo!(qDx, qDy, qDz)
             end
             @parallel update_Pf!(Pf, qDx, qDy, qDz, _dx, _dy, _dz, _β_dτ_D)
@@ -277,7 +290,7 @@ end
         end
         @parallel update_k!(k, logke, Ea, R, T)
         @hide_communication b_width begin
-            @parallel compute_Reaction!(C, dt, Ceq, k)
+            @parallel compute_Reaction!(C, dt, k, _Ceq)
             update_halo!(C)
         end
         if me == 0
