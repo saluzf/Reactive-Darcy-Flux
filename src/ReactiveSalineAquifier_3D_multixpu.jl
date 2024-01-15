@@ -150,7 +150,7 @@ end
 """
 Main function Reactive Saline Aquifier
 """
-@views function SalineAquifier3D(; nz=63,nt=50, do_viz=false)
+@views function ReactiveSalineAquifier3D(; nz=63,nt=50, do_viz=false)
     # physics
     lx, ly, lz = 40.0, 20.0, 20.0
     k_ηf       = 1.0
@@ -297,7 +297,7 @@ Main function Reactive Saline Aquifier
             @printf("it = %d, iter/nx=%.1f, err_D=%1.3e, err_T=%1.3e, err_C=%1.3e\n", it, iter / nx, err_D, err_T, err_C)
         end
         # visualisation
-        if do_viz &&  (it % nvis == 0) || it == 1
+        if do_viz &&  ((it % nvis == 0) || it == 1)
             T_inn .= Array(T)[2:end-1, 2:end-1, 2:end-1]; gather!(T_inn, T_v)
             C_inn .= Array(C)[2:end-1, 2:end-1, 2:end-1]; gather!(C_inn, C_v)
             if me == 0
@@ -306,7 +306,7 @@ Main function Reactive Saline Aquifier
         end
     end
     finalize_global_grid()
-    return
+    return T, C
 end
 
-SalineAquifier3D(; nz=21,nt=500, do_viz=true)
+#ReactiveSalineAquifier3D(; nz=21,nt=500, do_viz=true)

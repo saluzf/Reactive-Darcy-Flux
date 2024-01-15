@@ -289,7 +289,7 @@ Main function Isothermal Saline Aquifier.
             @printf("it = %d, iter/nx=%.1f, err_D=%1.3e, err_T=%1.3e, err_C=%1.3e\n", it, iter / nx, err_D, err_T, err_C)
         end
         # visualisation
-        if do_viz &&  (it % nvis == 0) || it == 1
+        if do_viz &&  ((it % nvis == 0) || it == 1)
             T_inn .= Array(T)[2:end-1, 2:end-1, 2:end-1]; gather!(T_inn, T_v)
             C_inn .= Array(C)[2:end-1, 2:end-1, 2:end-1]; gather!(C_inn, C_v)
             if me == 0
@@ -298,7 +298,7 @@ Main function Isothermal Saline Aquifier.
         end
     end
     finalize_global_grid()
-    return
+    return T, C
 end
 
-IsothermalSalineAquifier3D(; nz=21,nt=500, do_viz=true)
+# IsothermalSalineAquifier3D(; nz=21,nt=500, do_viz=true)
