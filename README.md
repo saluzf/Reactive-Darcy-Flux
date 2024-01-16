@@ -57,8 +57,36 @@ As in the porous convection project the system of equation is solved with a pseu
 
 ![Alt text](./docs/Eq10.png)  
 
-### Chemistry
-For simplicity the fluid is assumed to be an aqueous solution of SiO2. The solid consists of mineral quartz and dissolves slowly into the water according to SiO2(s) <=> SiO2(aq). The reaction constants are taken from: Chapter 5.4 in Bortoli, De AL, Greice Andreis, and Felipe Pereira. Modeling and simulation of reactive flows. Elsevier, 2015. They found log(k)=-13.4 and Ea=90.4kJ/mol. 
+
+### Chemistry  
+
+For simplicity the fluid is assumed to be an aqueous solution of SiO2. The solid consists of mineral quartz and dissolves slowly into the water according to SiO2(s) <=> SiO2(aq). The reaction constants are taken from: Chapter 5.4 in Bortoli, De AL, Greice Andreis, and Felipe Pereira. Modeling and simulation of reactive flows. Elsevier, 2015. They found log(k)=-13.4 and Ea=90.4kJ/mol. The chemistry is not added to the concentration transport equation. An operator split is applied and the temperature and concentration in each time step is solved first and the reaction rate is computed afterwards. 
+
+### Computations  
+
+The simulations where performed on the [Piz Daint Supercomputer of ETHZ](https://www.cscs.ch/computers/piz-daint) using 4 Nvidia P100 16GB PCIe GPU for each simulation. The following script depicts the settings used for the batch job:
+```
+#!/bin/bash -l
+#SBATCH --job-name="diff2D"
+#SBATCH --output=diff2D.%j.o
+#SBATCH --error=diff2D.%j.e
+#SBATCH --time=08:00:00
+#SBATCH --nodes=4
+#SBATCH --ntasks-per-node=1
+#SBATCH --partition=normal
+#SBATCH --constraint=gpu
+#SBATCH --account class04
+
+
+module load daint-gpu
+module load Julia/1.9.3-CrayGNU-21.09-cuda
+
+
+export MPICH_RDMA_ENABLED_CUDA=0
+export IGG_CUDAAWARE_MPI=0
+
+srun -n4 bash -c 'LD_PRELOAD="/usr/lib64/libcuda.so:/usr/local/cuda/lib64/libcudart.so" julia --project -O3 --check-bounds=no ReactiveSalineAquifier_3D_multixpu.jl'
+```
 
 ### Initial and Boundary Conditions
 
@@ -70,22 +98,34 @@ The
 
 ## Isothermal Saline Aquifier
  
-
+The underlying code can be found in [Isothermal Saline Aquifier](src/IsothermalSalineAquifier_3D_multixpu.jl). The isothermal saline aquifier assumes constant temperature in the whole domain. Changes in the density arise only from concentration changes. 
 
 ![Alt text](docs/IsothermalSalineAquifier.gif)
 
 ## Non-Isothermal Saline Aquifier
 
-
- Instead of only considering temperature influences on the porous transport I now added a concentration dependence. Darcy's law which was used to approximate the porous flow and to compute the density can be expanded by a concentration dependance according to equation (1). The temperature profile including initial and boundary conditions from the porous convection solver remains the same. The concentration intials conditions are selected similarly for simplicty. In the beginning the concentration is 0 everywhere except for two hotspots. The hotspots are not in the same position as the temperature intial hotspot. 
+The underlying code can be found in [Non-Isothermal Saline Aquifier](src/SalineAquifier_3D_multixpu.jl). Instead of only considering temperature influences on the porous transport I now added a concentration dependence. Darcy's law which was used to approximate the porous flow and to compute the density can be expanded by a concentration dependance according to equation (1). The temperature profile including initial and boundary conditions from the porous convection solver remains the same. The concentration intials conditions are selected similarly for simplicty. In the beginning the concentration is 0 everywhere except for two hotspots. The hotspots are not in the same position as the temperature intial hotspot. 
  
  The same intial and boundary conditions was simulated 3 times for different volumetric expansion coefficients of the fluid:
  
- The first solution was obtained for $\alpha=10\beta$ The rising warm and the sinking cold fluid dominate the transport of the concentrations and drag along the concentrations. Nevertheless if there is no temperature gradient one can clearly patches of increased concentration to get advect downwards. 
+ The first solution was obtained for $\alpha=10\beta$ The rising warm and the sinking cold fluid dominate the transport of the concentrations and drag along the concentrations. Nevertheless if there is no temperature gradient one can clearly see patches of increased concentration to get advected downwards. 
+
 ![Alt text](docs/SalineAquifier.gif)
 
+## Reactive Saline Aquifier
+
+The underlying code can be found in [Reactive Saline Aquifier](src/ReactiveSalineAquifier_3D_multixpu.jl). In a final step the reaction is added to the system. One can clearly see that the temperature is dominating the density changes. The reaction rate is too small to have a significant effect. Therefore temperature is the driving force for the reaction. Because of the temperature dependence of the rection hot streams cause more salt to be edged out into the  
+
+![Alt text](docs/ReactiveSalineAquifier.gif)  
+
+## Outlook
+
+## Literature
+
+1. Bortoli, De AL, Greice Andreis, and Felipe Pereira. Modeling and simulation of reactive flows. Elsevier, 2015.
 
 
+2. Susan L. Brantley James D. Kubicki Art F. White. Kinetics of Water-Rock Interaction. Springer, 2008.
 
 
-
+3. Ludovic Räss,   Mauro Werder,   Samuel Omlin & Ivan Utkin, Fall 2023, [PDE on GPU Course-Webpage](https://pde-on-gpu.vaw.ethz.ch), last accessed: 16.01.2024, (https://pde-on-gpu.vaw.ethz.ch).
