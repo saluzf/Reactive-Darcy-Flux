@@ -1,7 +1,9 @@
 # Visualisation script for the 2D MPI solver
 using Plots, MAT
 
-
+"""
+Visualization script: Reads in mat file produces in the SalineAquifierSolver, plots content of each for temperature and pressure and combines the mto .gif.
+"""
 @views function vizme2D_mpi()
     #firstplot
     anim = @animate for i in 1:41
