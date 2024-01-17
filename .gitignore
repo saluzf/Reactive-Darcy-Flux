@@ -3,3 +3,4 @@ Manifest.toml
 *.mat
 src/viz3D_out/
 src/PorousConvection/
+src/PDF
